@@ -8,7 +8,7 @@ License:        GPL-2.0
 Summary:        Fast, scalable, distributed revision control system
 Url:            http://git-scm.com
 Group:          Development/Tools/Version Control
-Source:         %{name}-%{version}.tar.bz2
+Source:         %{name}-%{version}.tar.gz
 BuildRequires:  curl
 BuildRequires:  expat-devel
 BuildRequires:  fdupes
