@@ -1,0 +1,23 @@
+---
+ contrib/completion/git-completion.bash |   10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+--- a/contrib/completion/git-completion.bash
++++ b/contrib/completion/git-completion.bash
+@@ -77,10 +77,12 @@
+ 	autoload -U +X bashcompinit && bashcompinit
+ fi
+ 
+-case "$COMP_WORDBREAKS" in
+-*:*) : great ;;
+-*)   COMP_WORDBREAKS="$COMP_WORDBREAKS:"
+-esac
++# SUSE-specific: We trust the system is consistent and do not let individual
++# scripts play ping-pong with the global $COMP_WORDBREAKS value.
++#case "$COMP_WORDBREAKS" in
++#*:*) : great ;;
++#*)   COMP_WORDBREAKS="$COMP_WORDBREAKS:"
++#esac
+ 
+ # __gitdir accepts 0 or 1 arguments (i.e., location)
+ # returns location of .git repo

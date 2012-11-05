@@ -1,0 +1,27 @@
+---
+ Makefile                    |    2 +-
+ git_remote_helpers/Makefile |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+--- a/git_remote_helpers/Makefile
++++ b/git_remote_helpers/Makefile
+@@ -29,7 +29,7 @@
+ 	$(QUIET)$(PYTHON_PATH) $(pysetupfile) $(QUIETSETUP) build
+ 
+ install: $(pysetupfile)
+-	$(PYTHON_PATH) $(pysetupfile) install --prefix $(DESTDIR_SQ)$(prefix)
++	$(PYTHON_PATH) $(pysetupfile) install --prefix $(prefix) --root $(DESTDIR_SQ)
+ 
+ instlibdir: $(pysetupfile)
+ 	@echo "$(DESTDIR_SQ)$(prefix)/$(PYLIBDIR)"
+--- a/Makefile
++++ b/Makefile
+@@ -1800,7 +1800,7 @@
+ $(patsubst %.py,%,$(SCRIPT_PYTHON)): % : %.py
+ 	$(QUIET_GEN)$(RM) $@ $@+ && \
+ 	INSTLIBDIR=`MAKEFLAGS= $(MAKE) -C git_remote_helpers -s \
+-		--no-print-directory prefix='$(prefix_SQ)' DESTDIR='$(DESTDIR_SQ)' \
++		--no-print-directory prefix='$(prefix_SQ)' DESTDIR=\
+ 		instlibdir` && \
+ 	sed -e '1s|#!.*python|#!$(PYTHON_PATH_SQ)|' \
+ 	    -e 's|\(os\.getenv("GITPYTHONLIB"\)[^)]*)|\1,"@@INSTLIBDIR@@")|' \
