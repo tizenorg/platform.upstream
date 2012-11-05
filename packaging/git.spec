@@ -2,22 +2,13 @@
 %define _fwdefdir /etc/sysconfig/SuSEfirewall2.d/services
 
 Name:           git
-Version:        1.7.10.4
+Version:        1.8.0
 Release:        0
 License:        GPL-2.0
 Summary:        Fast, scalable, distributed revision control system
 Url:            http://git-scm.com
 Group:          Development/Tools/Version Control
 Source:         %{name}-%{version}.tar.bz2
-Source2:        sysconfig.git-daemon
-Source3:        git-daemon.init
-Source4:        git.xinetd
-Source5:        usr.share.git-web.gitweb.cgi
-Patch1:         git-nohardlink.diff
-Patch2:         git-python-install-fix.diff
-Patch3:         completion-wordbreaks.diff
-# CVE-2011-2186, bnc#698456
-Patch4:         git-prevent_xss-default.diff
 BuildRequires:  curl
 BuildRequires:  expat-devel
 BuildRequires:  fdupes
@@ -163,10 +154,6 @@ This package contains the building blocks for remote helpers written in Python.
 
 %prep
 %setup -q
-%patch1 -p1
-%patch2 -p1
-%patch3 -p1
-%patch4 -p1
 
 %build
 cat > .make <<'EOF'
