@@ -445,8 +445,8 @@ static int is_rfc3986_unreserved(char ch)
 		ch == '-' || ch == '_' || ch == '.' || ch == '~';
 }
 
-void strbuf_add_urlencode(struct strbuf *sb, const char *s, size_t len,
-			  int reserved)
+static void strbuf_add_urlencode(struct strbuf *sb, const char *s, size_t len,
+				 int reserved)
 {
 	strbuf_grow(sb, len);
 	while (len--) {
@@ -463,4 +463,28 @@ void strbuf_addstr_urlencode(struct strbuf *sb, const char *s,
 			     int reserved)
 {
 	strbuf_add_urlencode(sb, s, strlen(s), reserved);
+}
+
+int printf_ln(const char *fmt, ...)
+{
+	int ret;
+	va_list ap;
+	va_start(ap, fmt);
+	ret = vprintf(fmt, ap);
+	va_end(ap);
+	if (ret < 0 || putchar('\n') == EOF)
+		return -1;
+	return ret + 1;
+}
+
+int fprintf_ln(FILE *fp, const char *fmt, ...)
+{
+	int ret;
+	va_list ap;
+	va_start(ap, fmt);
+	ret = vfprintf(fp, fmt, ap);
+	va_end(ap);
+	if (ret < 0 || putc('\n', fp) == EOF)
+		return -1;
+	return ret + 1;
 }

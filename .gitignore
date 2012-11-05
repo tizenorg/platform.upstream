@@ -2,6 +2,9 @@
 /GIT-CFLAGS
 /GIT-LDFLAGS
 /GIT-GUI-VARS
+/GIT-PREFIX
+/GIT-SCRIPT-DEFINES
+/GIT-USER-AGENT
 /GIT-VERSION-FILE
 /bin-wrappers/
 /git
@@ -26,10 +29,12 @@
 /git-cherry-pick
 /git-clean
 /git-clone
+/git-column
 /git-commit
 /git-commit-tree
 /git-config
 /git-count-objects
+/git-credential
 /git-credential-cache
 /git-credential-cache--daemon
 /git-credential-store
@@ -92,6 +97,7 @@
 /git-name-rev
 /git-mv
 /git-notes
+/git-p4
 /git-pack-redundant
 /git-pack-objects
 /git-pack-refs
@@ -170,7 +176,6 @@
 /gitweb/static/gitweb.js
 /gitweb/static/gitweb.min.*
 /test-chmtime
-/test-credential
 /test-ctype
 /test-date
 /test-delta
@@ -180,12 +185,16 @@
 /test-index-version
 /test-line-buffer
 /test-match-trees
+/test-mergesort
 /test-mktemp
 /test-parse-options
 /test-path-utils
+/test-regex
+/test-revision-walking
 /test-run-command
 /test-sha1
 /test-sigchain
+/test-string-list
 /test-subprocess
 /test-svn-fe
 /common-cmds.h
