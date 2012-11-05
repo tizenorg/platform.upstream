@@ -9,12 +9,10 @@ Summary:        Fast, scalable, distributed revision control system
 Url:            http://git-scm.com
 Group:          Development/Tools/Version Control
 Source:         %{name}-%{version}.tar.bz2
-Source1:        apache2-gitweb.conf
 Source2:        sysconfig.git-daemon
 Source3:        git-daemon.init
 Source4:        git.xinetd
 Source5:        usr.share.git-web.gitweb.cgi
-Source6:        susefirewall-git-daemon
 Patch1:         git-nohardlink.diff
 Patch2:         git-python-install-fix.diff
 Patch3:         completion-wordbreaks.diff
@@ -29,7 +27,6 @@ BuildRequires:  libopenssl-devel
 BuildRequires:  perl-Error
 BuildRequires:  python
 Requires:       git-core = %{version}
-BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 
 %description
 Git is a fast, scalable, distributed revision control system with an
