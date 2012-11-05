@@ -1,0 +1,16 @@
+don't use hardlinks as our .spec calls fdupes which converts the
+hardlinks to symlinks again in an unpredicatable way
+---
+ Makefile |    1 -
+ 1 file changed, 1 deletion(-)
+
+--- a/Makefile
++++ b/Makefile
+@@ -2252,7 +2252,6 @@
+ 	done && \
+ 	for p in $(BUILT_INS); do \
+ 		$(RM) "$$execdir/$$p" && \
+-		ln "$$execdir/git$X" "$$execdir/$$p" 2>/dev/null || \
+ 		ln -s "git$X" "$$execdir/$$p" 2>/dev/null || \
+ 		cp "$$execdir/git$X" "$$execdir/$$p" || exit; \
+ 	done && \
