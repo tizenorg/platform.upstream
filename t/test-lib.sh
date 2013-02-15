@@ -85,7 +85,8 @@ unset VISUAL EMAIL LANGUAGE COLUMNS $("$PERL_PATH" -e '
 		.*_TEST
 		PROVE
 		VALGRIND
-		PERF_AGGREGATING_LATER
+		UNZIP
+		PERF_
 	));
 	my @vars = grep(/^GIT_/ && !/^GIT_($ok)/o, @env);
 	print join("\n", @vars);
@@ -128,6 +129,7 @@ fi
 unset CDPATH
 
 unset GREP_OPTIONS
+unset UNZIP
 
 case $(echo $GIT_TRACE |tr "[A-Z]" "[a-z]") in
 1|2|true)
@@ -230,7 +232,7 @@ else
 	say_color() {
 		test -z "$1" && test -n "$quiet" && return
 		shift
-		echo "$*"
+		printf "%s\n" "$*"
 	}
 fi
 
@@ -389,7 +391,8 @@ test_done () {
 	then
 		test_results_dir="$TEST_OUTPUT_DIRECTORY/test-results"
 		mkdir -p "$test_results_dir"
-		test_results_path="$test_results_dir/${0%.sh}-$$.counts"
+		base=${0##*/}
+		test_results_path="$test_results_dir/${base%.sh}-$$.counts"
 
 		cat >>"$test_results_path" <<-EOF
 		total $test_count
@@ -736,6 +739,12 @@ test_lazy_prereq UTF8_NFD_TO_NFC '
 	*)
 		false ;;
 	esac
+'
+
+test_lazy_prereq AUTOIDENT '
+	sane_unset GIT_AUTHOR_NAME &&
+	sane_unset GIT_AUTHOR_EMAIL &&
+	git var GIT_AUTHOR_IDENT
 '
 
 # When the tests are run as root, permission tests will report that

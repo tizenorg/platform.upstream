@@ -506,6 +506,7 @@ extern const char tolower_trans_tbl[256];
 #undef isdigit
 #undef isalpha
 #undef isalnum
+#undef isprint
 #undef islower
 #undef isupper
 #undef tolower
@@ -523,6 +524,7 @@ extern unsigned char sane_ctype[256];
 #define isdigit(x) sane_istest(x,GIT_DIGIT)
 #define isalpha(x) sane_istest(x,GIT_ALPHA)
 #define isalnum(x) sane_istest(x,GIT_ALPHA | GIT_DIGIT)
+#define isprint(x) ((x) >= 0x20 && (x) <= 0x7e)
 #define islower(x) sane_iscase(x, 1)
 #define isupper(x) sane_iscase(x, 0)
 #define is_glob_special(x) sane_istest(x,GIT_GLOB_SPECIAL)
@@ -635,8 +637,12 @@ int rmdir_or_warn(const char *path);
  */
 int remove_or_warn(unsigned int mode, const char *path);
 
-/* Call access(2), but warn for any error besides ENOENT. */
+/*
+ * Call access(2), but warn for any error except "missing file"
+ * (ENOENT or ENOTDIR).
+ */
 int access_or_warn(const char *path, int mode);
+int access_or_die(const char *path, int mode);
 
 /* Warn on an inaccessible file that ought to be accessible */
 void warn_on_inaccessible(const char *path);

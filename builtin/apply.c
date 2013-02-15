@@ -2095,7 +2095,7 @@ static void update_pre_post_images(struct image *preimage,
 				   char *buf,
 				   size_t len, size_t postlen)
 {
-	int i, ctx;
+	int i, ctx, reduced;
 	char *new, *old, *fixed;
 	struct image fixed_preimage;
 
@@ -2105,8 +2105,10 @@ static void update_pre_post_images(struct image *preimage,
 	 * free "oldlines".
 	 */
 	prepare_image(&fixed_preimage, buf, len, 1);
-	assert(fixed_preimage.nr == preimage->nr);
-	for (i = 0; i < preimage->nr; i++)
+	assert(postlen
+	       ? fixed_preimage.nr == preimage->nr
+	       : fixed_preimage.nr <= preimage->nr);
+	for (i = 0; i < fixed_preimage.nr; i++)
 		fixed_preimage.line[i].flag = preimage->line[i].flag;
 	free(preimage->line_allocated);
 	*preimage = fixed_preimage;
@@ -2126,7 +2128,8 @@ static void update_pre_post_images(struct image *preimage,
 	else
 		new = old;
 	fixed = preimage->buf;
-	for (i = ctx = 0; i < postimage->nr; i++) {
+
+	for (i = reduced = ctx = 0; i < postimage->nr; i++) {
 		size_t len = postimage->line[i].len;
 		if (!(postimage->line[i].flag & LINE_COMMON)) {
 			/* an added line -- no counterparts in preimage */
@@ -2145,8 +2148,15 @@ static void update_pre_post_images(struct image *preimage,
 			fixed += preimage->line[ctx].len;
 			ctx++;
 		}
-		if (preimage->nr <= ctx)
-			die(_("oops"));
+
+		/*
+		 * preimage is expected to run out, if the caller
+		 * fixed addition of trailing blank lines.
+		 */
+		if (preimage->nr <= ctx) {
+			reduced++;
+			continue;
+		}
 
 		/* and copy it in, while fixing the line length */
 		len = preimage->line[ctx].len;
@@ -2159,6 +2169,7 @@ static void update_pre_post_images(struct image *preimage,
 
 	/* Fix the length of the whole thing */
 	postimage->len = new - postimage->buf;
+	postimage->nr -= reduced;
 }
 
 static int match_fragment(struct image *img,
@@ -3598,7 +3609,6 @@ static void build_fake_ancestor(struct patch *list, const char *filename)
 	 * worth showing the new sha1 prefix, but until then...
 	 */
 	for (patch = list; patch; patch = patch->next) {
-		const unsigned char *sha1_ptr;
 		unsigned char sha1[20];
 		struct cache_entry *ce;
 		const char *name;
@@ -3606,20 +3616,23 @@ static void build_fake_ancestor(struct patch *list, const char *filename)
 		name = patch->old_name ? patch->old_name : patch->new_name;
 		if (0 < patch->is_new)
 			continue;
-		else if (get_sha1_blob(patch->old_sha1_prefix, sha1))
-			/* git diff has no index line for mode/type changes */
-			if (!patch->lines_added && !patch->lines_deleted) {
-				if (get_current_sha1(patch->old_name, sha1))
-					die("mode change for %s, which is not "
-						"in current HEAD", name);
-				sha1_ptr = sha1;
-			} else
-				die("sha1 information is lacking or useless "
-					"(%s).", name);
-		else
-			sha1_ptr = sha1;
 
-		ce = make_cache_entry(patch->old_mode, sha1_ptr, name, 0, 0);
+		if (S_ISGITLINK(patch->old_mode)) {
+			if (get_sha1_hex(patch->old_sha1_prefix, sha1))
+				die("submoule change for %s without full index name",
+				    name);
+		} else if (!get_sha1_blob(patch->old_sha1_prefix, sha1)) {
+			; /* ok */
+		} else if (!patch->lines_added && !patch->lines_deleted) {
+			/* mode-only change: update the current */
+			if (get_current_sha1(patch->old_name, sha1))
+				die("mode change for %s, which is not "
+				    "in current HEAD", name);
+		} else
+			die("sha1 information is lacking or useless "
+			    "(%s).", name);
+
+		ce = make_cache_entry(patch->old_mode, sha1, name, 0, 0);
 		if (!ce)
 			die(_("make_cache_entry failed for path '%s'"), name);
 		if (add_index_entry(&result, ce, ADD_CACHE_OK_TO_ADD))

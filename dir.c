@@ -308,42 +308,69 @@ static int no_wildcard(const char *string)
 	return string[simple_length(string)] == '\0';
 }
 
+void parse_exclude_pattern(const char **pattern,
+			   int *patternlen,
+			   int *flags,
+			   int *nowildcardlen)
+{
+	const char *p = *pattern;
+	size_t i, len;
+
+	*flags = 0;
+	if (*p == '!') {
+		*flags |= EXC_FLAG_NEGATIVE;
+		p++;
+	}
+	len = strlen(p);
+	if (len && p[len - 1] == '/') {
+		len--;
+		*flags |= EXC_FLAG_MUSTBEDIR;
+	}
+	for (i = 0; i < len; i++) {
+		if (p[i] == '/')
+			break;
+	}
+	if (i == len)
+		*flags |= EXC_FLAG_NODIR;
+	*nowildcardlen = simple_length(p);
+	/*
+	 * we should have excluded the trailing slash from 'p' too,
+	 * but that's one more allocation. Instead just make sure
+	 * nowildcardlen does not exceed real patternlen
+	 */
+	if (*nowildcardlen > len)
+		*nowildcardlen = len;
+	if (*p == '*' && no_wildcard(p + 1))
+		*flags |= EXC_FLAG_ENDSWITH;
+	*pattern = p;
+	*patternlen = len;
+}
+
 void add_exclude(const char *string, const char *base,
 		 int baselen, struct exclude_list *which)
 {
 	struct exclude *x;
-	size_t len;
-	int to_exclude = 1;
-	int flags = 0;
+	int patternlen;
+	int flags;
+	int nowildcardlen;
 
-	if (*string == '!') {
-		to_exclude = 0;
-		string++;
-	}
-	len = strlen(string);
-	if (len && string[len - 1] == '/') {
+	parse_exclude_pattern(&string, &patternlen, &flags, &nowildcardlen);
+	if (flags & EXC_FLAG_MUSTBEDIR) {
 		char *s;
-		x = xmalloc(sizeof(*x) + len);
+		x = xmalloc(sizeof(*x) + patternlen + 1);
 		s = (char *)(x+1);
-		memcpy(s, string, len - 1);
-		s[len - 1] = '\0';
-		string = s;
+		memcpy(s, string, patternlen);
+		s[patternlen] = '\0';
 		x->pattern = s;
-		flags = EXC_FLAG_MUSTBEDIR;
 	} else {
 		x = xmalloc(sizeof(*x));
 		x->pattern = string;
 	}
-	x->to_exclude = to_exclude;
-	x->patternlen = strlen(string);
+	x->patternlen = patternlen;
+	x->nowildcardlen = nowildcardlen;
 	x->base = base;
 	x->baselen = baselen;
 	x->flags = flags;
-	if (!strchr(string, '/'))
-		x->flags |= EXC_FLAG_NODIR;
-	x->nowildcardlen = simple_length(string);
-	if (*string == '*' && no_wildcard(string+1))
-		x->flags |= EXC_FLAG_ENDSWITH;
 	ALLOC_GROW(which->excludes, which->nr + 1, which->alloc);
 	which->excludes[which->nr++] = x;
 }
@@ -505,6 +532,72 @@ static void prep_exclude(struct dir_struct *dir, const char *base, int baselen)
 	dir->basebuf[baselen] = '\0';
 }
 
+int match_basename(const char *basename, int basenamelen,
+		   const char *pattern, int prefix, int patternlen,
+		   int flags)
+{
+	if (prefix == patternlen) {
+		if (!strcmp_icase(pattern, basename))
+			return 1;
+	} else if (flags & EXC_FLAG_ENDSWITH) {
+		if (patternlen - 1 <= basenamelen &&
+		    !strcmp_icase(pattern + 1,
+				  basename + basenamelen - patternlen + 1))
+			return 1;
+	} else {
+		if (fnmatch_icase(pattern, basename, 0) == 0)
+			return 1;
+	}
+	return 0;
+}
+
+int match_pathname(const char *pathname, int pathlen,
+		   const char *base, int baselen,
+		   const char *pattern, int prefix, int patternlen,
+		   int flags)
+{
+	const char *name;
+	int namelen;
+
+	/*
+	 * match with FNM_PATHNAME; the pattern has base implicitly
+	 * in front of it.
+	 */
+	if (*pattern == '/') {
+		pattern++;
+		prefix--;
+	}
+
+	/*
+	 * baselen does not count the trailing slash. base[] may or
+	 * may not end with a trailing slash though.
+	 */
+	if (pathlen < baselen + 1 ||
+	    (baselen && pathname[baselen] != '/') ||
+	    strncmp_icase(pathname, base, baselen))
+		return 0;
+
+	namelen = baselen ? pathlen - baselen - 1 : pathlen;
+	name = pathname + pathlen - namelen;
+
+	if (prefix) {
+		/*
+		 * if the non-wildcard part is longer than the
+		 * remaining pathname, surely it cannot match.
+		 */
+		if (prefix > namelen)
+			return 0;
+
+		if (strncmp_icase(pattern, name, prefix))
+			return 0;
+		pattern += prefix;
+		name    += prefix;
+		namelen -= prefix;
+	}
+
+	return fnmatch_icase(pattern, name, FNM_PATHNAME) == 0;
+}
+
 /* Scan the list and let the last match determine the fate.
  * Return 1 for exclude, 0 for include and -1 for undecided.
  */
@@ -519,9 +612,9 @@ int excluded_from_list(const char *pathname,
 
 	for (i = el->nr - 1; 0 <= i; i--) {
 		struct exclude *x = el->excludes[i];
-		const char *name, *exclude = x->pattern;
-		int to_exclude = x->to_exclude;
-		int namelen, prefix = x->nowildcardlen;
+		const char *exclude = x->pattern;
+		int to_exclude = x->flags & EXC_FLAG_NEGATIVE ? 0 : 1;
+		int prefix = x->nowildcardlen;
 
 		if (x->flags & EXC_FLAG_MUSTBEDIR) {
 			if (*dtype == DT_UNKNOWN)
@@ -531,51 +624,18 @@ int excluded_from_list(const char *pathname,
 		}
 
 		if (x->flags & EXC_FLAG_NODIR) {
-			/* match basename */
-			if (prefix == x->patternlen) {
-				if (!strcmp_icase(exclude, basename))
-					return to_exclude;
-			} else if (x->flags & EXC_FLAG_ENDSWITH) {
-				if (x->patternlen - 1 <= pathlen &&
-				    !strcmp_icase(exclude + 1, pathname + pathlen - x->patternlen + 1))
-					return to_exclude;
-			} else {
-				if (fnmatch_icase(exclude, basename, 0) == 0)
-					return to_exclude;
-			}
+			if (match_basename(basename,
+					   pathlen - (basename - pathname),
+					   exclude, prefix, x->patternlen,
+					   x->flags))
+				return to_exclude;
 			continue;
 		}
 
-		/* match with FNM_PATHNAME:
-		 * exclude has base (baselen long) implicitly in front of it.
-		 */
-		if (*exclude == '/') {
-			exclude++;
-			prefix--;
-		}
-
-		if (pathlen < x->baselen ||
-		    (x->baselen && pathname[x->baselen-1] != '/') ||
-		    strncmp_icase(pathname, x->base, x->baselen))
-			continue;
-
-		namelen = x->baselen ? pathlen - x->baselen : pathlen;
-		name = pathname + pathlen  - namelen;
-
-		/* if the non-wildcard part is longer than the
-		   remaining pathname, surely it cannot match */
-		if (prefix > namelen)
-			continue;
-
-		if (prefix) {
-			if (strncmp_icase(exclude, name, prefix))
-				continue;
-			exclude += prefix;
-			name    += prefix;
-			namelen -= prefix;
-		}
-
-		if (!namelen || !fnmatch_icase(exclude, name, FNM_PATHNAME))
+		assert(x->baselen == 0 || x->base[x->baselen - 1] == '/');
+		if (match_pathname(pathname, pathlen,
+				   x->base, x->baselen ? x->baselen - 1 : 0,
+				   exclude, prefix, x->patternlen, x->flags))
 			return to_exclude;
 	}
 	return -1; /* undecided */
@@ -672,7 +732,8 @@ static struct dir_entry *dir_entry_new(const char *pathname, int len)
 
 static struct dir_entry *dir_add_name(struct dir_struct *dir, const char *pathname, int len)
 {
-	if (cache_name_exists(pathname, len, ignore_case))
+	if (!(dir->flags & DIR_SHOW_IGNORED) &&
+	    cache_name_exists(pathname, len, ignore_case))
 		return NULL;
 
 	ALLOC_GROW(dir->entries, dir->nr+1, dir->alloc);
@@ -774,8 +835,9 @@ static enum exist_status directory_exists_in_index(const char *dirname, int len)
  * traversal routine.
  *
  * Case 1: If we *already* have entries in the index under that
- * directory name, we always recurse into the directory to see
- * all the files.
+ * directory name, we recurse into the directory to see all the files,
+ * unless the directory is excluded and we want to show ignored
+ * directories
  *
  * Case 2: If we *already* have that directory name as a gitlink,
  * we always continue to see it as a gitlink, regardless of whether
@@ -789,6 +851,9 @@ static enum exist_status directory_exists_in_index(const char *dirname, int len)
  *      just a directory, unless "hide_empty_directories" is
  *      also true and the directory is empty, in which case
  *      we just ignore it entirely.
+ *      if we are looking for ignored directories, look if it
+ *      contains only ignored files to decide if it must be shown as
+ *      ignored or not.
  *  (b) if it looks like a git directory, and we don't have
  *      'no_gitlinks' set we treat it as a gitlink, and show it
  *      as a directory.
@@ -801,12 +866,15 @@ enum directory_treatment {
 };
 
 static enum directory_treatment treat_directory(struct dir_struct *dir,
-	const char *dirname, int len,
+	const char *dirname, int len, int exclude,
 	const struct path_simplify *simplify)
 {
 	/* The "len-1" is to strip the final '/' */
 	switch (directory_exists_in_index(dirname, len-1)) {
 	case index_directory:
+		if ((dir->flags & DIR_SHOW_OTHER_DIRECTORIES) && exclude)
+			break;
+
 		return recurse_into_directory;
 
 	case index_gitdir:
@@ -826,11 +894,66 @@ static enum directory_treatment treat_directory(struct dir_struct *dir,
 	}
 
 	/* This is the "show_other_directories" case */
-	if (!(dir->flags & DIR_HIDE_EMPTY_DIRECTORIES))
+
+	/*
+	 * We are looking for ignored files and our directory is not ignored,
+	 * check if it contains only ignored files
+	 */
+	if ((dir->flags & DIR_SHOW_IGNORED) && !exclude) {
+		int ignored;
+		dir->flags &= ~DIR_SHOW_IGNORED;
+		dir->flags |= DIR_HIDE_EMPTY_DIRECTORIES;
+		ignored = read_directory_recursive(dir, dirname, len, 1, simplify);
+		dir->flags &= ~DIR_HIDE_EMPTY_DIRECTORIES;
+		dir->flags |= DIR_SHOW_IGNORED;
+
+		return ignored ? ignore_directory : show_directory;
+	}
+	if (!(dir->flags & DIR_SHOW_IGNORED) &&
+	    !(dir->flags & DIR_HIDE_EMPTY_DIRECTORIES))
 		return show_directory;
 	if (!read_directory_recursive(dir, dirname, len, 1, simplify))
 		return ignore_directory;
 	return show_directory;
+}
+
+/*
+ * Decide what to do when we find a file while traversing the
+ * filesystem. Mostly two cases:
+ *
+ *  1. We are looking for ignored files
+ *   (a) File is ignored, include it
+ *   (b) File is in ignored path, include it
+ *   (c) File is not ignored, exclude it
+ *
+ *  2. Other scenarios, include the file if not excluded
+ *
+ * Return 1 for exclude, 0 for include.
+ */
+static int treat_file(struct dir_struct *dir, struct strbuf *path, int exclude, int *dtype)
+{
+	struct path_exclude_check check;
+	int exclude_file = 0;
+
+	if (exclude)
+		exclude_file = !(dir->flags & DIR_SHOW_IGNORED);
+	else if (dir->flags & DIR_SHOW_IGNORED) {
+		/* Always exclude indexed files */
+		struct cache_entry *ce = index_name_exists(&the_index,
+		    path->buf, path->len, ignore_case);
+
+		if (ce)
+			return 1;
+
+		path_exclude_check_init(&check, dir);
+
+		if (!path_excluded(&check, path->buf, path->len, dtype))
+			exclude_file = 1;
+
+		path_exclude_check_clear(&check);
+	}
+
+	return exclude_file;
 }
 
 /*
@@ -971,27 +1094,14 @@ static enum path_treatment treat_one_path(struct dir_struct *dir,
 	if (dtype == DT_UNKNOWN)
 		dtype = get_dtype(de, path->buf, path->len);
 
-	/*
-	 * Do we want to see just the ignored files?
-	 * We still need to recurse into directories,
-	 * even if we don't ignore them, since the
-	 * directory may contain files that we do..
-	 */
-	if (!exclude && (dir->flags & DIR_SHOW_IGNORED)) {
-		if (dtype != DT_DIR)
-			return path_ignored;
-	}
-
 	switch (dtype) {
 	default:
 		return path_ignored;
 	case DT_DIR:
 		strbuf_addch(path, '/');
-		switch (treat_directory(dir, path->buf, path->len, simplify)) {
+
+		switch (treat_directory(dir, path->buf, path->len, exclude, simplify)) {
 		case show_directory:
-			if (exclude != !!(dir->flags
-					  & DIR_SHOW_IGNORED))
-				return path_ignored;
 			break;
 		case recurse_into_directory:
 			return path_recurse;
@@ -1001,7 +1111,12 @@ static enum path_treatment treat_one_path(struct dir_struct *dir,
 		break;
 	case DT_REG:
 	case DT_LNK:
-		break;
+		switch (treat_file(dir, path, exclude, &dtype)) {
+		case 1:
+			return path_ignored;
+		default:
+			break;
+		}
 	}
 	return path_handled;
 }

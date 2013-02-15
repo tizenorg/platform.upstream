@@ -1202,6 +1202,8 @@ int peel_ref(const char *refname, unsigned char *sha1)
 	if (current_ref && (current_ref->name == refname
 		|| !strcmp(current_ref->name, refname))) {
 		if (current_ref->flag & REF_KNOWS_PEELED) {
+			if (is_null_sha1(current_ref->u.value.peeled))
+			    return -1;
 			hashcpy(sha1, current_ref->u.value.peeled);
 			return 0;
 		}
@@ -1223,9 +1225,16 @@ int peel_ref(const char *refname, unsigned char *sha1)
 	}
 
 fallback:
-	o = parse_object(base);
-	if (o && o->type == OBJ_TAG) {
-		o = deref_tag(o, refname, 0);
+	o = lookup_unknown_object(base);
+	if (o->type == OBJ_NONE) {
+		int type = sha1_object_info(base, NULL);
+		if (type < 0)
+			return -1;
+		o->type = type;
+	}
+
+	if (o->type == OBJ_TAG) {
+		o = deref_tag_noverify(o);
 		if (o) {
 			hashcpy(sha1, o->sha1);
 			return 0;
@@ -1735,7 +1744,8 @@ static struct lock_file packlock;
 static int repack_without_ref(const char *refname)
 {
 	struct repack_without_ref_sb data;
-	struct ref_dir *packed = get_packed_refs(get_ref_cache(NULL));
+	struct ref_cache *refs = get_ref_cache(NULL);
+	struct ref_dir *packed = get_packed_refs(refs);
 	if (find_ref(packed, refname) == NULL)
 		return 0;
 	data.refname = refname;
@@ -1744,6 +1754,8 @@ static int repack_without_ref(const char *refname)
 		unable_to_lock_error(git_path("packed-refs"), errno);
 		return error("cannot delete '%s' from packed refs", refname);
 	}
+	clear_packed_ref_cache(refs);
+	packed = get_packed_refs(refs);
 	do_for_each_ref_in_dir(packed, 0, "", repack_without_ref_fn, 0, 0, &data);
 	return commit_lock_file(&packlock);
 }
@@ -1753,32 +1765,24 @@ int delete_ref(const char *refname, const unsigned char *sha1, int delopt)
 	struct ref_lock *lock;
 	int err, i = 0, ret = 0, flag = 0;
 
-	lock = lock_ref_sha1_basic(refname, sha1, 0, &flag);
+	lock = lock_ref_sha1_basic(refname, sha1, delopt, &flag);
 	if (!lock)
 		return 1;
 	if (!(flag & REF_ISPACKED) || flag & REF_ISSYMREF) {
 		/* loose */
-		const char *path;
-
-		if (!(delopt & REF_NODEREF)) {
-			i = strlen(lock->lk->filename) - 5; /* .lock */
-			lock->lk->filename[i] = 0;
-			path = lock->lk->filename;
-		} else {
-			path = git_path("%s", refname);
-		}
-		err = unlink_or_warn(path);
+		i = strlen(lock->lk->filename) - 5; /* .lock */
+		lock->lk->filename[i] = 0;
+		err = unlink_or_warn(lock->lk->filename);
 		if (err && errno != ENOENT)
 			ret = 1;
 
-		if (!(delopt & REF_NODEREF))
-			lock->lk->filename[i] = '.';
+		lock->lk->filename[i] = '.';
 	}
 	/* removing the loose one could have resurrected an earlier
 	 * packed one.  Also, if it was not loose we need to repack
 	 * without it.
 	 */
-	ret |= repack_without_ref(refname);
+	ret |= repack_without_ref(lock->ref_name);
 
 	unlink_or_warn(git_path("logs/%s", lock->ref_name));
 	invalidate_ref_cache(NULL);
