@@ -1,13 +1,12 @@
 %define gitexecdir %{_libexecdir}/git
-%define _fwdefdir /etc/sysconfig/SuSEfirewall2.d/services
 
 Name:           git
-Version:        1.8.0
+Version:        1.8.1.3
 Release:        0
 License:        GPL-2.0
 Summary:        Fast, scalable, distributed revision control system
 Url:            http://git-scm.com
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Source:         %{name}-%{version}.tar.gz
 BuildRequires:  curl
 BuildRequires:  expat-devel
@@ -32,7 +31,7 @@ CVS, and GNU arch.
 
 %package core
 Summary:        Core git tools
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       less
 Requires:       openssh
 Requires:       perl-Error
@@ -48,7 +47,7 @@ These are the core tools with minimal dependencies.
 
 %package svn
 Summary:        Git tools for importing Subversion repositories
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 Requires:       subversion
 Requires:       subversion-perl
@@ -59,7 +58,7 @@ system.
 
 %package cvs
 Summary:        Git tools for importing CVS repositories
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       cvs
 Requires:       cvsps
 Requires:       git-core = %{version}
@@ -70,7 +69,7 @@ Tools for importing CVS repositories to the Git version control system.
 
 %package arch
 Summary:        Git tools for importing Arch repositories
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 # Requires:       tla
 
@@ -80,18 +79,18 @@ system.
 
 %package email
 Summary:        Git tools for sending email
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 # For sending mails over secure SMTP:
 Recommends:     perl-Authen-SASL
-Recommends:     perl-Net-SMTP-SSL,
+Recommends:     perl-Net-SMTP-SSL
 
 %description email
 Email interface for the GIT version control system.
 
 %package daemon
 Summary:        Simple Server for Git Repositories
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires(pre):  /usr/sbin/useradd
 Requires:       git-core = %{version}
 
@@ -101,7 +100,7 @@ read only access to repositories in /srv/git/ that contain the
 'git-daemon-export-ok' file.
 %package -n gitk
 Summary:        Git revision tree visualiser
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 Requires:       tk >= 8.4
 Supplements:    packageand(git-core:tk)
@@ -116,7 +115,7 @@ found in the package git-gui.
 
 %package gui
 Summary:        Grapical tool for common git operations
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 Requires:       tk >= 8.4
 Supplements:    packageand(git-core:tk)
@@ -133,7 +132,7 @@ menu actions to start a gitk session from within git-gui.
 
 %package web
 Summary:        Git Web Interface
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 Supplements:    packageand(git-core:apache2)
 
@@ -145,7 +144,7 @@ directory /git/ that calls the cgi script.
 
 %package remote-helpers
 Summary:        Python package for remote helper scripts
-Group:          Development/Tools/Version Control
+Group:          Development/Tools
 Requires:       git-core = %{version}
 Requires:       python
 
@@ -190,7 +189,9 @@ make %{?_smp_mflags} test
 rm -rf %{buildroot}/usr/lib/perl5/site_perl
 %perl_process_packlist
 find %{buildroot}/%{_mandir} -type f -print0 | xargs -0 chmod 644
+find %{buildroot}/%python_sitelib/ -type f -name *.pyc -print0 | xargs -0 rm
 install -m 644 -D contrib/completion/git-completion.bash %{buildroot}%{_sysconfdir}/bash_completion.d/git.sh
+sed -i  "s#$RPM_BUILD_ROOT##g" %{buildroot}/%{gitexecdir}/git-remote-testgit
 %find_lang %{name}
 cat %{name}.lang >>bin-man-doc-files
 # use symlinks instead of hardlinks in sub-commands
@@ -249,14 +250,15 @@ rm -rf %{buildroot}/%{_datadir}/gitweb
 
 %files core -f bin-man-doc-files
 %defattr(-,root,root)
+%license COPYING
 %{_bindir}/git
 %{_datadir}/git-core/
 %dir %{gitexecdir}
-%doc README COPYING Documentation/*.txt
+%doc Documentation/*.txt
 %{perl_vendorlib}/Git.pm
 %{perl_vendorlib}/Git/
 %{perl_vendorlib}/Git/*.pm
 %{perl_vendorarch}/auto/Git/
-%{_sysconfdir}/bash_completion.d/git.sh
+%attr(0644, root, root) %{_sysconfdir}/bash_completion.d/git.sh
 
 %changelog
