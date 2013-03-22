@@ -35,7 +35,7 @@ Group:          Development/Tools
 Requires:       less
 Requires:       openssh
 Requires:       perl-Error
-Requires:       perl-base = %{perl_version}
+Requires:       perl = %{perl_version}
 Requires:       rsync
 
 %description core
