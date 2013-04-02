@@ -8,6 +8,7 @@ Summary:        Fast, scalable, distributed revision control system
 Url:            http://git-scm.com
 Group:          Development/Tools
 Source:         %{name}-%{version}.tar.gz
+BuildRequires:  asciidoc
 BuildRequires:  curl
 BuildRequires:  expat-devel
 BuildRequires:  fdupes
@@ -16,6 +17,7 @@ BuildRequires:  libcurl-devel
 BuildRequires:  libopenssl-devel
 BuildRequires:  perl-Error
 BuildRequires:  python
+BuildRequires:  xmlto
 Requires:       git-core = %{version}
 
 %description
@@ -172,12 +174,13 @@ EOF
 #
 chmod 755 .make
 ./.make all %{?_smp_mflags}
+./.make doc
 
 %check
 make %{?_smp_mflags} test
 
 %install
-./.make install
+./.make install install-doc
 ###
 (find %{buildroot}%{_bindir} -type f | grep -vE "archimport|svn|cvs|email|gitk|daemon|gui" | sed -e s@^%{buildroot}@@)                   > bin-man-doc-files
 (find %{buildroot}%{gitexecdir} -mindepth 1 | grep -vE "archimport|svn|cvs|email|gitk|daemon|gui" | sed -e s@^%{buildroot}@@)               >> bin-man-doc-files
@@ -198,63 +201,54 @@ cat %{name}.lang >>bin-man-doc-files
 
 
 rm -rf %{buildroot}/%{_datadir}/gitweb
+rm -rf %{buildroot}/Documentation/*.html
+rm -rf %{buildroot}/Documentation/*.txt
 
 %fdupes -s %{buildroot}
 
 
 %files
-%defattr(-,root,root)
 %doc README
 
 %files svn
-%defattr(-,root,root)
 %{gitexecdir}/*svn*
-%doc Documentation/*svn*.txt
+%{_mandir}/man1/*svn*.1*
 
 %files cvs
-%defattr(-,root,root)
-%doc Documentation/*git-cvs*.txt
 %{_bindir}/git-cvs*
 %{gitexecdir}/*cvs*
+%{_mandir}/man1/*cvs*.1*
 
 %files arch
-%defattr(-,root,root)
-%doc Documentation/git-archimport.txt
 %{gitexecdir}/git-archimport
+%{_mandir}/man1/git-archimport.1*
 
 %files email
-%defattr(-,root,root)
-%doc Documentation/*email*.txt
 %{gitexecdir}/*email*
+%{_mandir}/man1/*email*.1*
 
 %files daemon
-%defattr(-,root,root)
-%doc Documentation/*daemon*.txt
 %{gitexecdir}/*daemon*
+%{_mandir}/man1/*daemon*.1*
 
 %files -n gitk
-%defattr(-,root,root)
-%doc Documentation/*gitk*.txt
 %{_bindir}/gitk
-/usr/share/gitk
+%{_datadir}/gitk
+%{_mandir}/man1/*gitk*.1*
 
 %files gui
-%defattr(-,root,root)
-%doc Documentation/*gui*.txt
 %{gitexecdir}/git-gui*
-/usr/share/git-gui
+%{_datadir}/git-gui
+%{_mandir}/man1/*gui*.1*
 
 %files remote-helpers
-%defattr(-,root,root)
 %python_sitelib/*
 
 %files core -f bin-man-doc-files
-%defattr(-,root,root)
 %license COPYING
 %{_bindir}/git
 %{_datadir}/git-core/
 %dir %{gitexecdir}
-%doc Documentation/*.txt
 %{perl_vendorlib}/Git.pm
 %{perl_vendorlib}/Git/
 %{perl_vendorlib}/Git/*.pm

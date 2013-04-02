@@ -1,3 +1,10 @@
+* Tue Apr 02 2013 Patrick McCarty <patrick.mccarty@linux.intel.com> ed4a775
+- (TZPC-1773) Package the man pages, required for git-buildpackage
+- Depend on asciidoc/xmlto, required for building the man pages
+- Remove documentation in HTML and text formats (duplicates man pages)
+- spec cleanup: Use %{_datadir} instead of /usr/share
+- spec cleanup: Remove %defattr macros that are added by default
+
 * Fri Mar 22 2013 Anas Nashif <anas.nashif@intel.com> accepted/trunk/20130216.045217@4c2988b
 - Do not require perl-base
 
