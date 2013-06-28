@@ -8,6 +8,7 @@ Summary:        Fast, scalable, distributed revision control system
 Url:            http://git-scm.com
 Group:          Development/Tools
 Source:         %{name}-%{version}.tar.gz
+Source1001: 	git.manifest
 BuildRequires:  asciidoc
 BuildRequires:  curl
 BuildRequires:  expat-devel
@@ -155,6 +156,7 @@ This package contains the building blocks for remote helpers written in Python.
 
 %prep
 %setup -q
+cp %{SOURCE1001} .
 
 %build
 cat > .make <<'EOF'
@@ -208,43 +210,53 @@ rm -rf %{buildroot}/Documentation/*.txt
 
 
 %files
+%manifest %{name}.manifest
 %doc README
 
 %files svn
+%manifest %{name}.manifest
 %{gitexecdir}/*svn*
 %{_mandir}/man1/*svn*.1*
 
 %files cvs
+%manifest %{name}.manifest
 %{_bindir}/git-cvs*
 %{gitexecdir}/*cvs*
 %{_mandir}/man1/*cvs*.1*
 
 %files arch
+%manifest %{name}.manifest
 %{gitexecdir}/git-archimport
 %{_mandir}/man1/git-archimport.1*
 
 %files email
+%manifest %{name}.manifest
 %{gitexecdir}/*email*
 %{_mandir}/man1/*email*.1*
 
 %files daemon
+%manifest %{name}.manifest
 %{gitexecdir}/*daemon*
 %{_mandir}/man1/*daemon*.1*
 
 %files -n gitk
+%manifest %{name}.manifest
 %{_bindir}/gitk
 %{_datadir}/gitk
 %{_mandir}/man1/*gitk*.1*
 
 %files gui
+%manifest %{name}.manifest
 %{gitexecdir}/git-gui*
 %{_datadir}/git-gui
 %{_mandir}/man1/*gui*.1*
 
 %files remote-helpers
+%manifest %{name}.manifest
 %python_sitelib/*
 
 %files core -f bin-man-doc-files
+%manifest %{name}.manifest
 %license COPYING
 %{_bindir}/git
 %{_datadir}/git-core/
