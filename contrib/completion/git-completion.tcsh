@@ -1,5 +1,3 @@
-#!tcsh
-#
 # tcsh completion support for core Git.
 #
 # Copyright (C) 2012 Marc Khouzam <marc.khouzam@gmail.com>
@@ -51,6 +49,18 @@ cat << EOF > ${__git_tcsh_completion_script}
 # and source it again.
 
 source ${__git_tcsh_completion_original_script}
+
+# Remove the colon as a completion separator because tcsh cannot handle it
+COMP_WORDBREAKS=\${COMP_WORDBREAKS//:}
+
+# For file completion, tcsh needs the '/' to be appended to directories.
+# By default, the bash script does not do that.
+# We can achieve this by using the below compatibility
+# method of the git-completion.bash script.
+__git_index_file_list_filter ()
+{
+	__git_index_file_list_filter_compat
+}
 
 # Set COMP_WORDS in a way that can be handled by the bash script.
 COMP_WORDS=(\$2)

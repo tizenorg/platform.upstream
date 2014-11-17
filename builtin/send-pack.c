@@ -5,10 +5,12 @@
 #include "sideband.h"
 #include "run-command.h"
 #include "remote.h"
+#include "connect.h"
 #include "send-pack.h"
 #include "quote.h"
 #include "transport.h"
 #include "version.h"
+#include "sha1-array.h"
 
 static const char send_pack_usage[] =
 "git send-pack [--all | --mirror] [--dry-run] [--force] [--receive-pack=<git-receive-pack>] [--verbose] [--thin] [<host>:]<directory> [<ref>...]\n"
@@ -44,6 +46,26 @@ static void print_helper_status(struct ref *ref)
 			msg = "non-fast forward";
 			break;
 
+		case REF_STATUS_REJECT_FETCH_FIRST:
+			res = "error";
+			msg = "fetch first";
+			break;
+
+		case REF_STATUS_REJECT_NEEDS_FORCE:
+			res = "error";
+			msg = "needs force";
+			break;
+
+		case REF_STATUS_REJECT_STALE:
+			res = "error";
+			msg = "stale info";
+			break;
+
+		case REF_STATUS_REJECT_ALREADY_EXISTS:
+			res = "error";
+			msg = "already exists";
+			break;
+
 		case REF_STATUS_REJECT_NODELETE:
 		case REF_STATUS_REMOTE_REJECT:
 			res = "error";
@@ -64,7 +86,7 @@ static void print_helper_status(struct ref *ref)
 		}
 		strbuf_addch(&buf, '\n');
 
-		safe_write(1, buf.buf, buf.len);
+		write_or_die(1, buf.buf, buf.len);
 	}
 	strbuf_release(&buf);
 }
@@ -78,30 +100,32 @@ int cmd_send_pack(int argc, const char **argv, const char *prefix)
 	const char *dest = NULL;
 	int fd[2];
 	struct child_process *conn;
-	struct extra_have_objects extra_have;
+	struct sha1_array extra_have = SHA1_ARRAY_INIT;
+	struct sha1_array shallow = SHA1_ARRAY_INIT;
 	struct ref *remote_refs, *local_refs;
 	int ret;
 	int helper_status = 0;
 	int send_all = 0;
 	const char *receivepack = "git-receive-pack";
 	int flags;
-	int nonfastforward = 0;
+	unsigned int reject_reasons;
 	int progress = -1;
+	struct push_cas_option cas = {0};
 
 	argv++;
 	for (i = 1; i < argc; i++, argv++) {
 		const char *arg = *argv;
 
 		if (*arg == '-') {
-			if (!prefixcmp(arg, "--receive-pack=")) {
+			if (starts_with(arg, "--receive-pack=")) {
 				receivepack = arg + 15;
 				continue;
 			}
-			if (!prefixcmp(arg, "--exec=")) {
+			if (starts_with(arg, "--exec=")) {
 				receivepack = arg + 7;
 				continue;
 			}
-			if (!prefixcmp(arg, "--remote=")) {
+			if (starts_with(arg, "--remote=")) {
 				remote_name = arg + 9;
 				continue;
 			}
@@ -149,6 +173,22 @@ int cmd_send_pack(int argc, const char **argv, const char *prefix)
 				helper_status = 1;
 				continue;
 			}
+			if (!strcmp(arg, "--" CAS_OPT_NAME)) {
+				if (parse_push_cas_option(&cas, NULL, 0) < 0)
+					exit(1);
+				continue;
+			}
+			if (!strcmp(arg, "--no-" CAS_OPT_NAME)) {
+				if (parse_push_cas_option(&cas, NULL, 1) < 0)
+					exit(1);
+				continue;
+			}
+			if (starts_with(arg, "--" CAS_OPT_NAME "=")) {
+				if (parse_push_cas_option(&cas,
+							  strchr(arg, '=') + 1, 0) < 0)
+					exit(1);
+				continue;
+			}
 			usage(send_pack_usage);
 		}
 		if (!dest) {
@@ -190,9 +230,8 @@ int cmd_send_pack(int argc, const char **argv, const char *prefix)
 			args.verbose ? CONNECT_VERBOSE : 0);
 	}
 
-	memset(&extra_have, 0, sizeof(extra_have));
-
-	get_remote_heads(fd[0], &remote_refs, REF_NORMAL, &extra_have);
+	get_remote_heads(fd[0], NULL, 0, &remote_refs, REF_NORMAL,
+			 &extra_have, &shallow);
 
 	transport_verify_remote_names(nr_refspecs, refspecs);
 
@@ -209,6 +248,9 @@ int cmd_send_pack(int argc, const char **argv, const char *prefix)
 	if (match_push_refs(local_refs, &remote_refs, nr_refspecs, refspecs, flags))
 		return -1;
 
+	if (!is_empty_cas(&cas))
+		apply_push_cas(&cas, remote, remote_refs);
+
 	set_ref_status_for_push(remote_refs, args.send_mirror,
 		args.force_update);
 
@@ -223,7 +265,7 @@ int cmd_send_pack(int argc, const char **argv, const char *prefix)
 	ret |= finish_connect(conn);
 
 	if (!helper_status)
-		transport_print_push_status(dest, remote_refs, args.verbose, 0, &nonfastforward);
+		transport_print_push_status(dest, remote_refs, args.verbose, 0, &reject_reasons);
 
 	if (!args.dry_run && remote) {
 		struct ref *ref;

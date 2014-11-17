@@ -300,11 +300,13 @@ static int fuzzy_matchlines(const char *s1, size_t n1,
 	while ((*last2 == '\r') || (*last2 == '\n'))
 		last2--;
 
-	/* skip leading whitespace */
-	while (isspace(*s1) && (s1 <= last1))
-		s1++;
-	while (isspace(*s2) && (s2 <= last2))
-		s2++;
+	/* skip leading whitespaces, if both begin with whitespace */
+	if (s1 <= last1 && s2 <= last2 && isspace(*s1) && isspace(*s2)) {
+		while (isspace(*s1) && (s1 <= last1))
+			s1++;
+		while (isspace(*s2) && (s2 <= last2))
+			s2++;
+	}
 	/* early return if both lines are empty */
 	if ((s1 > last1) && (s2 > last2))
 		return 1;
@@ -473,7 +475,7 @@ static char *find_name_gnu(const char *line, const char *def, int p_value)
 
 	/*
 	 * Proposed "new-style" GNU patch/diff format; see
-	 * http://marc.theaimsgroup.com/?l=git&m=112927316408690&w=2
+	 * http://marc.info/?l=git&m=112927316408690&w=2
 	 */
 	if (unquote_c_style(&name, line, NULL)) {
 		strbuf_release(&name);
@@ -722,7 +724,7 @@ static char *find_name(const char *line, char *def, int p_value, int terminate)
 
 static char *find_name_traditional(const char *line, char *def, int p_value)
 {
-	size_t len = strlen(line);
+	size_t len;
 	size_t date_len;
 
 	if (*line == '"') {
@@ -906,7 +908,7 @@ static void parse_traditional_patch(const char *first, const char *second, struc
 			patch->old_name = name;
 		} else {
 			patch->old_name = name;
-			patch->new_name = xstrdup(name);
+			patch->new_name = null_strdup(name);
 		}
 	}
 	if (!name)
@@ -1041,15 +1043,17 @@ static int gitdiff_renamedst(const char *line, struct patch *patch)
 
 static int gitdiff_similarity(const char *line, struct patch *patch)
 {
-	if ((patch->score = strtoul(line, NULL, 10)) == ULONG_MAX)
-		patch->score = 0;
+	unsigned long val = strtoul(line, NULL, 10);
+	if (val <= 100)
+		patch->score = val;
 	return 0;
 }
 
 static int gitdiff_dissimilarity(const char *line, struct patch *patch)
 {
-	if ((patch->score = strtoul(line, NULL, 10)) == ULONG_MAX)
-		patch->score = 0;
+	unsigned long val = strtoul(line, NULL, 10);
+	if (val <= 100)
+		patch->score = val;
 	return 0;
 }
 
@@ -1407,10 +1411,10 @@ static void recount_diff(const char *line, int size, struct fragment *fragment)
 		case '\\':
 			continue;
 		case '@':
-			ret = size < 3 || prefixcmp(line, "@@ ");
+			ret = size < 3 || !starts_with(line, "@@ ");
 			break;
 		case 'd':
-			ret = size < 5 || prefixcmp(line, "diff ");
+			ret = size < 5 || !starts_with(line, "diff ");
 			break;
 		default:
 			ret = -1;
@@ -1796,11 +1800,11 @@ static struct fragment *parse_binary_hunk(char **buf_p,
 
 	*status_p = 0;
 
-	if (!prefixcmp(buffer, "delta ")) {
+	if (starts_with(buffer, "delta ")) {
 		patch_method = BINARY_DELTA_DEFLATED;
 		origlen = strtoul(buffer + 6, NULL, 10);
 	}
-	else if (!prefixcmp(buffer, "literal ")) {
+	else if (starts_with(buffer, "literal ")) {
 		patch_method = BINARY_LITERAL_DEFLATED;
 		origlen = strtoul(buffer + 8, NULL, 10);
 	}
@@ -1919,7 +1923,7 @@ static int parse_binary(char *buffer, unsigned long size, struct patch *patch)
 }
 
 /*
- * Read the patch text in "buffer" taht extends for "size" bytes; stop
+ * Read the patch text in "buffer" that extends for "size" bytes; stop
  * reading after seeing a single patch (i.e. changes to a single file).
  * Create fragments (i.e. patch hunks) and hang them to the given patch.
  * Return the number of bytes consumed, so that the caller can call us
@@ -1941,13 +1945,7 @@ static int parse_chunk(char *buffer, unsigned long size, struct patch *patch)
 				       size - offset - hdrsize, patch);
 
 	if (!patchsize) {
-		static const char *binhdr[] = {
-			"Binary files ",
-			"Files ",
-			NULL,
-		};
 		static const char git_binary[] = "GIT binary patch\n";
-		int i;
 		int hd = hdrsize + offset;
 		unsigned long llen = linelen(buffer + hd, size - hd);
 
@@ -1963,6 +1961,12 @@ static int parse_chunk(char *buffer, unsigned long size, struct patch *patch)
 				patchsize = 0;
 		}
 		else if (!memcmp(" differ\n", buffer + hd + llen - 8, 8)) {
+			static const char *binhdr[] = {
+				"Binary files ",
+				"Files ",
+				NULL,
+			};
+			int i;
 			for (i = 0; binhdr[i]; i++) {
 				int len = strlen(binhdr[i]);
 				if (len < size - hd &&
@@ -2115,10 +2119,10 @@ static void update_pre_post_images(struct image *preimage,
 
 	/*
 	 * Adjust the common context lines in postimage. This can be
-	 * done in-place when we are just doing whitespace fixing,
-	 * which does not make the string grow, but needs a new buffer
-	 * when ignoring whitespace causes the update, since in this case
-	 * we could have e.g. tabs converted to multiple spaces.
+	 * done in-place when we are shrinking it with whitespace
+	 * fixing, but needs a new buffer when ignoring whitespace or
+	 * expanding leading tabs to spaces.
+	 *
 	 * We trust the caller to tell us if the update can be done
 	 * in place (postlen==0) or not.
 	 */
@@ -2183,7 +2187,7 @@ static int match_fragment(struct image *img,
 	int i;
 	char *fixed_buf, *buf, *orig, *target;
 	struct strbuf fixed;
-	size_t fixed_len;
+	size_t fixed_len, postlen;
 	int preimage_limit;
 
 	if (preimage->nr + try_lno <= img->nr) {
@@ -2333,6 +2337,7 @@ static int match_fragment(struct image *img,
 	strbuf_init(&fixed, preimage->len + 1);
 	orig = preimage->buf;
 	target = img->buf + try;
+	postlen = 0;
 	for (i = 0; i < preimage_limit; i++) {
 		size_t oldlen = preimage->line[i].len;
 		size_t tgtlen = img->line[try_lno + i].len;
@@ -2360,6 +2365,7 @@ static int match_fragment(struct image *img,
 		match = (tgtfix.len == fixed.len - fixstart &&
 			 !memcmp(tgtfix.buf, fixed.buf + fixstart,
 					     fixed.len - fixstart));
+		postlen += tgtfix.len;
 
 		strbuf_release(&tgtfix);
 		if (!match)
@@ -2397,8 +2403,10 @@ static int match_fragment(struct image *img,
 	 * hunk match.  Update the context lines in the postimage.
 	 */
 	fixed_buf = strbuf_detach(&fixed, &fixed_len);
+	if (postlen < postimage->len)
+		postlen = 0;
 	update_pre_post_images(preimage, postimage,
-			       fixed_buf, fixed_len, 0);
+			       fixed_buf, fixed_len, postlen);
 	return 1;
 
  unmatch_exit:
@@ -2993,7 +3001,7 @@ static int read_blob_object(struct strbuf *buf, const unsigned char *sha1, unsig
 	return 0;
 }
 
-static int read_file_or_gitlink(struct cache_entry *ce, struct strbuf *buf)
+static int read_file_or_gitlink(const struct cache_entry *ce, struct strbuf *buf)
 {
 	if (!ce)
 		return 0;
@@ -3023,7 +3031,7 @@ static struct patch *in_fn_table(const char *name)
  *
  * The latter is needed to deal with a case where two paths A and B
  * are swapped by first renaming A to B and then renaming B to A;
- * moving A to B should not be prevented due to presense of B as we
+ * moving A to B should not be prevented due to presence of B as we
  * will remove it in a later patch.
  */
 #define PATH_TO_BE_DELETED ((struct patch *) -2)
@@ -3111,7 +3119,7 @@ static struct patch *previous_patch(struct patch *patch, int *gone)
 	return previous;
 }
 
-static int verify_index_match(struct cache_entry *ce, struct stat *st)
+static int verify_index_match(const struct cache_entry *ce, struct stat *st)
 {
 	if (S_ISGITLINK(ce->ce_mode)) {
 		if (!S_ISDIR(st->st_mode))
@@ -3124,7 +3132,7 @@ static int verify_index_match(struct cache_entry *ce, struct stat *st)
 #define SUBMODULE_PATCH_WITHOUT_INDEX 1
 
 static int load_patch_target(struct strbuf *buf,
-			     struct cache_entry *ce,
+			     const struct cache_entry *ce,
 			     struct stat *st,
 			     const char *name,
 			     unsigned expected_mode)
@@ -3154,7 +3162,8 @@ static int load_patch_target(struct strbuf *buf,
  * we read from the result of a previous diff.
  */
 static int load_preimage(struct image *image,
-			 struct patch *patch, struct stat *st, struct cache_entry *ce)
+			 struct patch *patch, struct stat *st,
+			 const struct cache_entry *ce)
 {
 	struct strbuf buf = STRBUF_INIT;
 	size_t len;
@@ -3267,7 +3276,7 @@ static int load_current(struct image *image, struct patch *patch)
 }
 
 static int try_threeway(struct image *image, struct patch *patch,
-			struct stat *st, struct cache_entry *ce)
+			struct stat *st, const struct cache_entry *ce)
 {
 	unsigned char pre_sha1[20], post_sha1[20], our_sha1[20];
 	struct strbuf buf = STRBUF_INIT;
@@ -3337,7 +3346,7 @@ static int try_threeway(struct image *image, struct patch *patch,
 	return 0;
 }
 
-static int apply_data(struct patch *patch, struct stat *st, struct cache_entry *ce)
+static int apply_data(struct patch *patch, struct stat *st, const struct cache_entry *ce)
 {
 	struct image image;
 
@@ -3507,7 +3516,7 @@ static int check_patch(struct patch *patch)
 	 *
 	 * A patch to swap-rename between A and B would first rename A
 	 * to B and then rename B to A.  While applying the first one,
-	 * the presense of B should not stop A from getting renamed to
+	 * the presence of B should not stop A from getting renamed to
 	 * B; ask to_be_deleted() about the later rename.  Removal of
 	 * B and rename from A to B is handled the same way by asking
 	 * was_deleted().
@@ -3519,7 +3528,7 @@ static int check_patch(struct patch *patch)
 		ok_if_exists = 0;
 
 	if (new_name &&
-	    ((0 < patch->is_new) | (0 < patch->is_rename) | patch->is_copy)) {
+	    ((0 < patch->is_new) || patch->is_rename || patch->is_copy)) {
 		int err = check_to_create(new_name, ok_if_exists);
 
 		if (err && threeway) {
@@ -3598,6 +3607,40 @@ static int get_current_sha1(const char *path, unsigned char *sha1)
 	return 0;
 }
 
+static int preimage_sha1_in_gitlink_patch(struct patch *p, unsigned char sha1[20])
+{
+	/*
+	 * A usable gitlink patch has only one fragment (hunk) that looks like:
+	 * @@ -1 +1 @@
+	 * -Subproject commit <old sha1>
+	 * +Subproject commit <new sha1>
+	 * or
+	 * @@ -1 +0,0 @@
+	 * -Subproject commit <old sha1>
+	 * for a removal patch.
+	 */
+	struct fragment *hunk = p->fragments;
+	static const char heading[] = "-Subproject commit ";
+	char *preimage;
+
+	if (/* does the patch have only one hunk? */
+	    hunk && !hunk->next &&
+	    /* is its preimage one line? */
+	    hunk->oldpos == 1 && hunk->oldlines == 1 &&
+	    /* does preimage begin with the heading? */
+	    (preimage = memchr(hunk->patch, '\n', hunk->size)) != NULL &&
+	    starts_with(++preimage, heading) &&
+	    /* does it record full SHA-1? */
+	    !get_sha1_hex(preimage + sizeof(heading) - 1, sha1) &&
+	    preimage[sizeof(heading) + 40 - 1] == '\n' &&
+	    /* does the abbreviated name on the index line agree with it? */
+	    starts_with(preimage + sizeof(heading) - 1, p->old_sha1_prefix))
+		return 0; /* it all looks fine */
+
+	/* we may have full object name on the index line */
+	return get_sha1_hex(p->old_sha1_prefix, sha1);
+}
+
 /* Build an index that contains the just the files needed for a 3way merge */
 static void build_fake_ancestor(struct patch *list, const char *filename)
 {
@@ -3618,8 +3661,10 @@ static void build_fake_ancestor(struct patch *list, const char *filename)
 			continue;
 
 		if (S_ISGITLINK(patch->old_mode)) {
-			if (get_sha1_hex(patch->old_sha1_prefix, sha1))
-				die("submoule change for %s without full index name",
+			if (!preimage_sha1_in_gitlink_patch(patch, sha1))
+				; /* ok, the textual part looks sane */
+			else
+				die("sha1 information is lacking or useless for submoule %s",
 				    name);
 		} else if (!get_sha1_blob(patch->old_sha1_prefix, sha1)) {
 			; /* ok */
@@ -3805,7 +3850,7 @@ static void add_index_file(const char *path, unsigned mode, void *buf, unsigned 
 		const char *s = buf;
 
 		if (get_sha1_hex(s + strlen("Subproject commit "), ce->sha1))
-			die(_("corrupt patch for subproject %s"), path);
+			die(_("corrupt patch for submodule %s"), path);
 	} else {
 		if (!cached) {
 			if (lstat(path, &st) < 0)
@@ -4018,7 +4063,7 @@ static int write_out_one_reject(struct patch *patch)
 		return error(_("cannot open %s: %s"), namebuf, strerror(errno));
 
 	/* Normal git tools never deal with .rej, so do not pretend
-	 * this is a git patch by saying --git nor give extended
+	 * this is a git patch by saying --git or giving extended
 	 * headers.  While at it, maybe please "kompare" that wants
 	 * the trailing TAB and some garbage at the end of line ;-).
 	 */
@@ -4109,7 +4154,7 @@ static int use_patch(struct patch *p)
 	/* See if it matches any of exclude/include rule */
 	for (i = 0; i < limit_by_name.nr; i++) {
 		struct string_list_item *it = &limit_by_name.items[i];
-		if (!fnmatch(it->string, pathname, 0))
+		if (!wildmatch(it->string, pathname, 0, NULL))
 			return (it->util != NULL);
 	}
 
@@ -4320,23 +4365,23 @@ int cmd_apply(int argc, const char **argv, const char *prefix_)
 		{ OPTION_CALLBACK, 'p', NULL, NULL, N_("num"),
 			N_("remove <num> leading slashes from traditional diff paths"),
 			0, option_parse_p },
-		OPT_BOOLEAN(0, "no-add", &no_add,
+		OPT_BOOL(0, "no-add", &no_add,
 			N_("ignore additions made by the patch")),
-		OPT_BOOLEAN(0, "stat", &diffstat,
+		OPT_BOOL(0, "stat", &diffstat,
 			N_("instead of applying the patch, output diffstat for the input")),
 		OPT_NOOP_NOARG(0, "allow-binary-replacement"),
 		OPT_NOOP_NOARG(0, "binary"),
-		OPT_BOOLEAN(0, "numstat", &numstat,
+		OPT_BOOL(0, "numstat", &numstat,
 			N_("show number of added and deleted lines in decimal notation")),
-		OPT_BOOLEAN(0, "summary", &summary,
+		OPT_BOOL(0, "summary", &summary,
 			N_("instead of applying the patch, output a summary for the input")),
-		OPT_BOOLEAN(0, "check", &check,
+		OPT_BOOL(0, "check", &check,
 			N_("instead of applying the patch, see if the patch is applicable")),
-		OPT_BOOLEAN(0, "index", &check_index,
+		OPT_BOOL(0, "index", &check_index,
 			N_("make sure the patch is applicable to the current index")),
-		OPT_BOOLEAN(0, "cached", &cached,
+		OPT_BOOL(0, "cached", &cached,
 			N_("apply a patch without touching the working tree")),
-		OPT_BOOLEAN(0, "apply", &force_apply,
+		OPT_BOOL(0, "apply", &force_apply,
 			N_("also apply the patch (use with --stat/--summary/--check)")),
 		OPT_BOOL('3', "3way", &threeway,
 			 N_( "attempt three-way merge if a patch does not apply")),
@@ -4356,13 +4401,13 @@ int cmd_apply(int argc, const char **argv, const char *prefix_)
 		{ OPTION_CALLBACK, 0, "ignore-whitespace", NULL, NULL,
 			N_("ignore changes in whitespace when finding context"),
 			PARSE_OPT_NOARG, option_parse_space_change },
-		OPT_BOOLEAN('R', "reverse", &apply_in_reverse,
+		OPT_BOOL('R', "reverse", &apply_in_reverse,
 			N_("apply the patch in reverse")),
-		OPT_BOOLEAN(0, "unidiff-zero", &unidiff_zero,
+		OPT_BOOL(0, "unidiff-zero", &unidiff_zero,
 			N_("don't expect at least one line of context")),
-		OPT_BOOLEAN(0, "reject", &apply_with_reject,
+		OPT_BOOL(0, "reject", &apply_with_reject,
 			N_("leave the rejected hunks in corresponding *.rej files")),
-		OPT_BOOLEAN(0, "allow-overlap", &allow_overlap,
+		OPT_BOOL(0, "allow-overlap", &allow_overlap,
 			N_("allow overlapping hunks")),
 		OPT__VERBOSE(&apply_verbosely, N_("be verbose")),
 		OPT_BIT(0, "inaccurate-eof", &options,

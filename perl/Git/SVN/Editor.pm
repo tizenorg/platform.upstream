@@ -145,7 +145,8 @@ sub repo_path {
 sub url_path {
 	my ($self, $path) = @_;
 	if ($self->{url} =~ m#^https?://#) {
-		$path =~ s!([^~a-zA-Z0-9_./-])!uc sprintf("%%%02x",ord($1))!eg;
+		# characters are taken from subversion/libsvn_subr/path.c
+		$path =~ s#([^~a-zA-Z0-9_./!$&'()*+,-])#sprintf("%%%02X",ord($1))#eg;
 	}
 	$self->{url} . '/' . $self->repo_path($path);
 }
@@ -303,8 +304,12 @@ sub C {
 	my ($self, $m, $deletions) = @_;
 	my ($dir, $file) = split_path($m->{file_b});
 	my $pbat = $self->ensure_path($dir, $deletions);
+	# workaround for a bug in svn serf backend (v1.8.5 and below):
+	# store third argument to ->add_file() in a local variable, to make it
+	# have the same lifetime as $fbat
+	my $upa = $self->url_path($m->{file_a});
 	my $fbat = $self->add_file($self->repo_path($m->{file_b}), $pbat,
-				$self->url_path($m->{file_a}), $self->{r});
+				$upa, $self->{r});
 	print "\tC\t$m->{file_a} => $m->{file_b}\n" unless $::_q;
 	$self->chg_file($fbat, $m);
 	$self->close_file($fbat,undef,$self->{pool});
@@ -322,8 +327,10 @@ sub R {
 	my ($self, $m, $deletions) = @_;
 	my ($dir, $file) = split_path($m->{file_b});
 	my $pbat = $self->ensure_path($dir, $deletions);
+	# workaround for a bug in svn serf backend, see comment in C() above
+	my $upa = $self->url_path($m->{file_a});
 	my $fbat = $self->add_file($self->repo_path($m->{file_b}), $pbat,
-				$self->url_path($m->{file_a}), $self->{r});
+				$upa, $self->{r});
 	print "\tR\t$m->{file_a} => $m->{file_b}\n" unless $::_q;
 	$self->apply_autoprops($file, $fbat);
 	$self->chg_file($fbat, $m);
@@ -358,12 +365,12 @@ sub T {
 			mode_a => $m->{mode_a}, mode_b => '000000',
 			sha1_a => $m->{sha1_a}, sha1_b => '0' x 40,
 			chg => 'D', file_b => $m->{file_b}
-		});
+		}, $deletions);
 		$self->A({
 			mode_a => '000000', mode_b => $m->{mode_b},
 			sha1_a => '0' x 40, sha1_b => $m->{sha1_b},
 			chg => 'A', file_b => $m->{file_b}
-		});
+		}, $deletions);
 		return;
 	}
 
@@ -497,6 +504,8 @@ sub apply_diff {
 
 1;
 __END__
+
+=head1 NAME
 
 Git::SVN::Editor - commit driver for "git svn set-tree" and dcommit
 

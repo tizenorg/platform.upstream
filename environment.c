@@ -10,9 +10,11 @@
 #include "cache.h"
 #include "refs.h"
 #include "fmt-merge-msg.h"
+#include "commit.h"
 
 int trust_executable_bit = 1;
 int trust_ctime = 1;
+int check_stat = 1;
 int has_symlinks = 1;
 int minimum_abbrev = 4, default_abbrev = 7;
 int ignore_case;
@@ -21,6 +23,7 @@ int prefer_symlink_refs;
 int is_bare_repository_cfg = -1; /* unspecified */
 int log_all_ref_updates = -1; /* unspecified */
 int warn_ambiguous_refs = 1;
+int warn_on_object_refname_ambiguity = 1;
 int repository_format_version;
 const char *git_commit_encoding;
 const char *git_log_output_encoding;
@@ -36,14 +39,13 @@ size_t packed_git_window_size = DEFAULT_PACKED_GIT_WINDOW_SIZE;
 size_t packed_git_limit = DEFAULT_PACKED_GIT_LIMIT;
 size_t delta_base_cache_limit = 16 * 1024 * 1024;
 unsigned long big_file_threshold = 512 * 1024 * 1024;
-const char *log_pack_access;
 const char *pager_program;
 int pager_use_color = 1;
 const char *editor_program;
 const char *askpass_program;
 const char *excludes_file;
 enum auto_crlf auto_crlf = AUTO_CRLF_FALSE;
-int read_replace_refs = 1; /* NEEDSWORK: rename to use_replace_refs */
+int check_replace_refs = 1;
 enum eol core_eol = EOL_UNSET;
 enum safe_crlf safe_crlf = SAFE_CRLF_WARN;
 unsigned whitespace_rule_cfg = WS_DEFAULT_RULE;
@@ -62,6 +64,12 @@ int precomposed_unicode = -1; /* see probe_utf8_pathname_composition() */
 struct startup_info *startup_info;
 unsigned long pack_size_limit_cfg;
 
+/*
+ * The character that begins a commented line in user-editable file
+ * that is subject to stripspace.
+ */
+char comment_line_char = '#';
+
 /* Parallel index stat data preload? */
 int core_preload_index = 0;
 
@@ -76,20 +84,21 @@ static const char *git_dir;
 static char *git_object_dir, *git_index_file, *git_graft_file;
 
 /*
- * Repository-local GIT_* environment variables
- * Remember to update local_repo_env_size in cache.h when
- * the size of the list changes
+ * Repository-local GIT_* environment variables; see cache.h for details.
  */
-const char * const local_repo_env[LOCAL_REPO_ENV_SIZE + 1] = {
+const char * const local_repo_env[] = {
 	ALTERNATE_DB_ENVIRONMENT,
 	CONFIG_ENVIRONMENT,
 	CONFIG_DATA_ENVIRONMENT,
 	DB_ENVIRONMENT,
 	GIT_DIR_ENVIRONMENT,
 	GIT_WORK_TREE_ENVIRONMENT,
+	GIT_IMPLICIT_WORK_TREE_ENVIRONMENT,
 	GRAFT_ENVIRONMENT,
 	INDEX_ENVIRONMENT,
 	NO_REPLACE_OBJECTS_ENVIRONMENT,
+	GIT_PREFIX_ENVIRONMENT,
+	GIT_SHALLOW_FILE_ENVIRONMENT,
 	NULL
 };
 
@@ -116,14 +125,14 @@ static char *expand_namespace(const char *raw_namespace)
 
 static void setup_git_env(void)
 {
+	const char *gitfile;
+	const char *shallow_file;
+
 	git_dir = getenv(GIT_DIR_ENVIRONMENT);
-	git_dir = git_dir ? xstrdup(git_dir) : NULL;
-	if (!git_dir) {
-		git_dir = read_gitfile(DEFAULT_GIT_DIR_ENVIRONMENT);
-		git_dir = git_dir ? xstrdup(git_dir) : NULL;
-	}
 	if (!git_dir)
 		git_dir = DEFAULT_GIT_DIR_ENVIRONMENT;
+	gitfile = read_gitfile(git_dir);
+	git_dir = xstrdup(gitfile ? gitfile : git_dir);
 	git_object_dir = getenv(DB_ENVIRONMENT);
 	if (!git_object_dir) {
 		git_object_dir = xmalloc(strlen(git_dir) + 9);
@@ -138,20 +147,18 @@ static void setup_git_env(void)
 	if (!git_graft_file)
 		git_graft_file = git_pathdup("info/grafts");
 	if (getenv(NO_REPLACE_OBJECTS_ENVIRONMENT))
-		read_replace_refs = 0;
+		check_replace_refs = 0;
 	namespace = expand_namespace(getenv(GIT_NAMESPACE_ENVIRONMENT));
 	namespace_len = strlen(namespace);
+	shallow_file = getenv(GIT_SHALLOW_FILE_ENVIRONMENT);
+	if (shallow_file)
+		set_alternate_shallow_file(shallow_file, 0);
 }
 
 int is_bare_repository(void)
 {
 	/* if core.bare is not 'false', let's see if there is a work tree */
 	return is_bare_repository_cfg && !get_git_work_tree();
-}
-
-int have_git_dir(void)
-{
-	return !!git_dir;
 }
 
 const char *get_git_dir(void)
@@ -170,7 +177,7 @@ const char *get_git_namespace(void)
 
 const char *strip_namespace(const char *namespaced_ref)
 {
-	if (prefixcmp(namespaced_ref, get_git_namespace()) != 0)
+	if (!starts_with(namespaced_ref, get_git_namespace()))
 		return NULL;
 	return namespaced_ref + namespace_len;
 }
@@ -230,7 +237,7 @@ int odb_mkstemp(char *template, size_t limit, const char *pattern)
 	return xmkstemp_mode(template, mode);
 }
 
-int odb_pack_keep(char *name, size_t namesz, unsigned char *sha1)
+int odb_pack_keep(char *name, size_t namesz, const unsigned char *sha1)
 {
 	int fd;
 

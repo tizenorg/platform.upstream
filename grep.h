@@ -28,7 +28,8 @@ enum grep_context {
 };
 
 enum grep_header_field {
-	GREP_HEADER_AUTHOR = 0,
+	GREP_HEADER_FIELD_MIN = 0,
+	GREP_HEADER_AUTHOR = GREP_HEADER_FIELD_MIN,
 	GREP_HEADER_COMMITTER,
 	GREP_HEADER_REFLOG,
 
@@ -106,6 +107,7 @@ struct grep_opt {
 #define GREP_BINARY_NOMATCH	1
 #define GREP_BINARY_TEXT	2
 	int binary;
+	int allow_textconv;
 	int extended;
 	int use_reflog_filter;
 	int pcre;

@@ -193,7 +193,7 @@ AC_ARG_ENABLE([pthreads],
   [FLAGS is the value to pass to the compiler to enable POSIX Threads.]
   [The default if FLAGS is not specified is to try first -pthread]
   [and then -lpthread.]
-  [--without-pthreads will disable threading.])],
+  [--disable-pthreads will disable threading.])],
 [
 if test "x$enableval" = "xyes"; then
    AC_MSG_NOTICE([Will try -pthread then -lpthread to enable POSIX Threads])
@@ -753,6 +753,14 @@ AC_CHECK_MEMBER(struct dirent.d_type,
 [#include <dirent.h>])
 GIT_CONF_SUBST([NO_D_TYPE_IN_DIRENT])
 #
+# Define NO_GECOS_IN_PWENT if you don't have pw_gecos in struct passwd
+# in the C library.
+AC_CHECK_MEMBER(struct passwd.pw_gecos,
+[NO_GECOS_IN_PWENT=],
+[NO_GECOS_IN_PWENT=YesPlease],
+[#include <pwd.h>])
+GIT_CONF_SUBST([NO_GECOS_IN_PWENT])
+#
 # Define NO_SOCKADDR_STORAGE if your platform does not have struct
 # sockaddr_storage.
 AC_CHECK_TYPE(struct sockaddr_storage,
@@ -872,11 +880,17 @@ AC_CHECK_HEADER([libcharset.h],
 [HAVE_LIBCHARSET_H=YesPlease],
 [HAVE_LIBCHARSET_H=])
 GIT_CONF_SUBST([HAVE_LIBCHARSET_H])
+#
+# Define HAVE_STRINGS_H if you have strings.h
+AC_CHECK_HEADER([strings.h],
+[HAVE_STRINGS_H=YesPlease],
+[HAVE_STRINGS_H=])
+GIT_CONF_SUBST([HAVE_STRINGS_H])
 # Define CHARSET_LIB if libiconv does not export the locale_charset symbol
 # and libcharset does
 CHARSET_LIB=
 AC_CHECK_LIB([iconv], [locale_charset],
-       [],
+       [CHARSET_LIB=-liconv],
        [AC_CHECK_LIB([charset], [locale_charset],
                      [CHARSET_LIB=-lcharset])])
 GIT_CONF_SUBST([CHARSET_LIB])
@@ -886,40 +900,6 @@ GIT_CHECK_FUNC(strcasestr,
 [NO_STRCASESTR=],
 [NO_STRCASESTR=YesPlease])
 GIT_CONF_SUBST([NO_STRCASESTR])
-#
-# Define NO_STRTOK_R if you don't have strtok_r
-GIT_CHECK_FUNC(strtok_r,
-[NO_STRTOK_R=],
-[NO_STRTOK_R=YesPlease])
-GIT_CONF_SUBST([NO_STRTOK_R])
-#
-# Define NO_FNMATCH if you don't have fnmatch
-GIT_CHECK_FUNC(fnmatch,
-[NO_FNMATCH=],
-[NO_FNMATCH=YesPlease])
-GIT_CONF_SUBST([NO_FNMATCH])
-#
-# Define NO_FNMATCH_CASEFOLD if your fnmatch function doesn't have the
-# FNM_CASEFOLD GNU extension.
-AC_CACHE_CHECK([whether the fnmatch function supports the FNMATCH_CASEFOLD GNU extension],
- [ac_cv_c_excellent_fnmatch], [
-AC_EGREP_CPP(yippeeyeswehaveit,
-	AC_LANG_PROGRAM([
-#include <fnmatch.h>
-],
-[#ifdef FNM_CASEFOLD
-yippeeyeswehaveit
-#endif
-]),
-	[ac_cv_c_excellent_fnmatch=yes],
-	[ac_cv_c_excellent_fnmatch=no])
-])
-if test $ac_cv_c_excellent_fnmatch = yes; then
-	NO_FNMATCH_CASEFOLD=
-else
-	NO_FNMATCH_CASEFOLD=YesPlease
-fi
-GIT_CONF_SUBST([NO_FNMATCH_CASEFOLD])
 #
 # Define NO_MEMMEM if you don't have memmem.
 GIT_CHECK_FUNC(memmem,

@@ -11,7 +11,6 @@ use Carp qw/croak/;
 use File::Path qw/mkpath/;
 use File::Copy qw/copy/;
 use IPC::Open3;
-use Time::Local;
 use Memoize;  # core since 5.8.0, Jul 2002
 use Memoize::Storable;
 use POSIX qw(:signal_h);
@@ -22,6 +21,7 @@ use Git qw(
     command_noisy
     command_output_pipe
     command_close_pipe
+    get_tz_offset
 );
 use Git::SVN::Utils qw(
 	fatal
@@ -480,8 +480,8 @@ sub refname {
 	# It cannot end with a slash /, we'll throw up on this because
 	# SVN can't have directories with a slash in their name, either:
 	if ($refname =~ m{/$}) {
-		die "ref: '$refname' ends with a trailing slash, this is ",
-		    "not permitted by git nor Subversion\n";
+		die "ref: '$refname' ends with a trailing slash; this is ",
+		    "not permitted by git or Subversion\n";
 	}
 
 	# It cannot have ASCII control character space, tilde ~, caret ^,
@@ -490,7 +490,7 @@ sub refname {
 	#
 	# Additionally, % must be escaped because it is used for escaping
 	# and we want our escaped refname to be reversible
-	$refname =~ s{([ \%~\^:\?\*\[\t])}{uc sprintf('%%%02x',ord($1))}eg;
+	$refname =~ s{([ \%~\^:\?\*\[\t])}{sprintf('%%%02X',ord($1))}eg;
 
 	# no slash-separated component can begin with a dot .
 	# /.* becomes /%2E*
@@ -1191,7 +1191,7 @@ sub do_fetch {
 		# we can have a branch that was deleted, then re-added
 		# under the same name but copied from another path, in
 		# which case we'll have multiple parents (we don't
-		# want to break the original ref, nor lose copypath info):
+		# want to break the original ref or lose copypath info):
 		if (my $log_entry = $self->find_parent_branch($paths, $rev)) {
 			push @{$log_entry->{parents}}, $lc;
 			return $log_entry;
@@ -1311,14 +1311,6 @@ sub get_untracked {
 	\@out;
 }
 
-sub get_tz {
-	# some systmes don't handle or mishandle %z, so be creative.
-	my $t = shift || time;
-	my $gm = timelocal(gmtime($t));
-	my $sign = qw( + + - )[ $t <=> $gm ];
-	return sprintf("%s%02d%02d", $sign, (gmtime(abs($t - $gm)))[2,1]);
-}
-
 # parse_svn_date(DATE)
 # --------------------
 # Given a date (in UTC) from Subversion, return a string in the format
@@ -1351,7 +1343,7 @@ sub parse_svn_date {
 			delete $ENV{TZ};
 		}
 
-		my $our_TZ = get_tz();
+		my $our_TZ = get_tz_offset();
 
 		# This converts $epoch_in_UTC into our local timezone.
 		my ($sec, $min, $hour, $mday, $mon, $year,
@@ -1501,13 +1493,18 @@ sub lookup_svn_merge {
 	my @merged_commit_ranges;
 	# find the tip
 	for my $range ( @ranges ) {
+		if ($range =~ /[*]$/) {
+			warn "W: Ignoring partial merge in svn:mergeinfo "
+				."dirprop: $source:$range\n";
+			next;
+		}
 		my ($bottom, $top) = split "-", $range;
 		$top ||= $bottom;
 		my $bottom_commit = $gs->find_rev_after( $bottom, 1, $top );
 		my $top_commit = $gs->find_rev_before( $top, 1, $bottom );
 
 		unless ($top_commit and $bottom_commit) {
-			warn "W:unknown path/rev in svn:mergeinfo "
+			warn "W: unknown path/rev in svn:mergeinfo "
 				."dirprop: $source:$range\n";
 			next;
 		}
@@ -1602,6 +1599,7 @@ sub tie_for_persistent_memoization {
 		my %lookup_svn_merge_cache;
 		my %check_cherry_pick_cache;
 		my %has_no_changes_cache;
+		my %_rev_list_cache;
 
 		tie_for_persistent_memoization(\%lookup_svn_merge_cache,
 		    "$cache_path/lookup_svn_merge");
@@ -1623,6 +1621,14 @@ sub tie_for_persistent_memoization {
 			SCALAR_CACHE => ['HASH' => \%has_no_changes_cache],
 			LIST_CACHE => 'FAULT',
 		;
+
+		tie_for_persistent_memoization(\%_rev_list_cache,
+		    "$cache_path/_rev_list");
+		memoize '_rev_list',
+			SCALAR_CACHE => 'FAULT',
+			LIST_CACHE => ['HASH' => \%_rev_list_cache],
+		;
+
 	}
 
 	sub unmemoize_svn_mergeinfo_functions {
@@ -1632,6 +1638,7 @@ sub tie_for_persistent_memoization {
 		Memoize::unmemoize 'lookup_svn_merge';
 		Memoize::unmemoize 'check_cherry_pick';
 		Memoize::unmemoize 'has_no_changes';
+		Memoize::unmemoize '_rev_list';
 	}
 
 	sub clear_memoized_mergeinfo_caches {
@@ -1962,11 +1969,25 @@ sub rebuild_from_rev_db {
 	unlink $path or croak "unlink: $!";
 }
 
+#define a global associate map to record rebuild status
+my %rebuild_status;
+#define a global associate map to record rebuild verify status
+my %rebuild_verify_status;
+
 sub rebuild {
 	my ($self) = @_;
 	my $map_path = $self->map_path;
 	my $partial = (-e $map_path && ! -z $map_path);
-	return unless ::verify_ref($self->refname.'^0');
+	my $verify_key = $self->refname.'^0';
+	if (!$rebuild_verify_status{$verify_key}) {
+		my $verify_result = ::verify_ref($verify_key);
+		if ($verify_result) {
+			$rebuild_verify_status{$verify_key} = 1;
+		}
+	}
+	if (!$rebuild_verify_status{$verify_key}) {
+		return;
+	}
 	if (!$partial && ($self->use_svm_props || $self->no_metadata)) {
 		my $rev_db = $self->rev_db_path;
 		$self->rebuild_from_rev_db($rev_db);
@@ -1980,10 +2001,21 @@ sub rebuild {
 	print "Rebuilding $map_path ...\n" if (!$partial);
 	my ($base_rev, $head) = ($partial ? $self->rev_map_max_norebuild(1) :
 		(undef, undef));
+	my $key_value = ($head ? "$head.." : "") . $self->refname;
+	if (exists $rebuild_status{$key_value}) {
+		print "Done rebuilding $map_path\n" if (!$partial || !$head);
+		my $rev_db_path = $self->rev_db_path;
+		if (-f $self->rev_db_path) {
+			unlink $self->rev_db_path or croak "unlink: $!";
+		}
+		$self->unlink_rev_db_symlink;
+		return;
+	}
 	my ($log, $ctx) =
-	    command_output_pipe(qw/rev-list --pretty=raw --reverse/,
-				($head ? "$head.." : "") . $self->refname,
+		command_output_pipe(qw/rev-list --pretty=raw --reverse/,
+				$key_value,
 				'--');
+	$rebuild_status{$key_value} = 1;
 	my $metadata_url = $self->metadata_url;
 	remove_username($metadata_url);
 	my $svn_uuid = $self->rewrite_uuid || $self->ra_uuid;
@@ -2377,7 +2409,7 @@ sub map_path {
 
 sub uri_encode {
 	my ($f) = @_;
-	$f =~ s#([^a-zA-Z0-9\*!\:_\./\-])#uc sprintf("%%%02x",ord($1))#eg;
+	$f =~ s#([^a-zA-Z0-9\*!\:_\./\-])#sprintf("%%%02X",ord($1))#eg;
 	$f
 }
 

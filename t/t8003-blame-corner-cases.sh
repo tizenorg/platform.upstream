@@ -175,6 +175,12 @@ test_expect_success 'blame -L with invalid end' '
 	grep "has only 2 lines" errors
 '
 
+test_expect_success 'blame parses <end> part of -L' '
+	git blame -L1,1 tres >out &&
+	cat out &&
+	test $(wc -l < out) -eq 1
+'
+
 test_expect_success 'indent of line numbers, nine lines' '
 	git blame nine_lines >actual &&
 	test $(grep -c "  " actual) = 0
@@ -183,6 +189,15 @@ test_expect_success 'indent of line numbers, nine lines' '
 test_expect_success 'indent of line numbers, ten lines' '
 	git blame ten_lines >actual &&
 	test $(grep -c "  " actual) = 9
+'
+
+test_expect_success 'blaming files with CRLF newlines' '
+	git config core.autocrlf false &&
+	printf "testcase\r\n" >crlffile &&
+	git add crlffile &&
+	git commit -m testcase &&
+	git -c core.autocrlf=input blame crlffile >actual &&
+	grep "A U Thor" actual
 '
 
 test_done

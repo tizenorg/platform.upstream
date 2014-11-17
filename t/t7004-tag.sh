@@ -104,6 +104,18 @@ test_expect_success 'creating a tag using HEAD directly should succeed' '
 	tag_exists myhead
 '
 
+test_expect_success '--force can create a tag with the name of one existing' '
+	tag_exists mytag &&
+	git tag --force mytag &&
+	tag_exists mytag'
+
+test_expect_success '--force is moot with a non-existing tag name' '
+	git tag newtag >expect &&
+	git tag --force forcetag >actual &&
+	test_cmp expect actual
+'
+git tag -d newtag forcetag
+
 # deleting tags:
 
 test_expect_success 'trying to delete an unknown tag should fail' '
@@ -1365,6 +1377,49 @@ test_expect_success 'multiple --points-at are OR-ed together' '
 	v3.0
 	EOF
 	git tag --points-at=v2.0 --points-at=v3.0 >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success 'lexical sort' '
+	git tag foo1.3 &&
+	git tag foo1.6 &&
+	git tag foo1.10 &&
+	git tag -l --sort=refname "foo*" >actual &&
+	cat >expect <<EOF &&
+foo1.10
+foo1.3
+foo1.6
+EOF
+	test_cmp expect actual
+'
+
+test_expect_success 'version sort' '
+	git tag -l --sort=version:refname "foo*" >actual &&
+	cat >expect <<EOF &&
+foo1.3
+foo1.6
+foo1.10
+EOF
+	test_cmp expect actual
+'
+
+test_expect_success 'reverse version sort' '
+	git tag -l --sort=-version:refname "foo*" >actual &&
+	cat >expect <<EOF &&
+foo1.10
+foo1.6
+foo1.3
+EOF
+	test_cmp expect actual
+'
+
+test_expect_success 'reverse lexical sort' '
+	git tag -l --sort=-refname "foo*" >actual &&
+	cat >expect <<EOF &&
+foo1.6
+foo1.3
+foo1.10
+EOF
 	test_cmp expect actual
 '
 
