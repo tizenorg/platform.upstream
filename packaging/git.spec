@@ -183,6 +183,7 @@ make %{?_smp_mflags} test
 
 %install
 ./.make install install-doc
+install -m 755  %{_builddir}/%{name}-%{version}/contrib/workdir/git-new-workdir %{buildroot}%{_bindir}
 ###
 (find %{buildroot}%{_bindir} -type f | grep -vE "archimport|svn|cvs|email|gitk|daemon|gui" | sed -e s@^%{buildroot}@@)                   > bin-man-doc-files
 (find %{buildroot}%{gitexecdir} -mindepth 1 | grep -vE "archimport|svn|cvs|email|gitk|daemon|gui" | sed -e s@^%{buildroot}@@)               >> bin-man-doc-files
@@ -259,6 +260,7 @@ rm -rf %{buildroot}/Documentation/*.txt
 %manifest %{name}.manifest
 %license COPYING
 %{_bindir}/git
+%{_bindir}/git-new-workdir
 %{_datadir}/git-core/
 %dir %{gitexecdir}
 %{perl_vendorlib}/Git.pm
