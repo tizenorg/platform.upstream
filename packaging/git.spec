@@ -189,6 +189,7 @@ rm -rf %{buildroot}/usr/lib/perl5/site_perl
 %perl_process_packlist
 find %{buildroot}/%{_mandir} -type f -print0 | xargs -0 chmod 644
 install -m 644 -D contrib/completion/git-completion.bash %{buildroot}%{_sysconfdir}/bash_completion.d/git.sh
+install -m 755 -D contrib/workdir/git-new-workdir %{buildroot}%{_bindir}
 %find_lang %{name}
 cat %{name}.lang >>bin-man-doc-files
 # use symlinks instead of hardlinks in sub-commands
@@ -247,6 +248,7 @@ rm -rf %{buildroot}/Documentation/*.txt
 %manifest %{name}.manifest
 %license COPYING
 %{_bindir}/git
+%{_bindir}/git-new-workdir
 %{_datadir}/git-core/
 %dir %{gitexecdir}
 %{perl_vendorlib}/Git.pm
